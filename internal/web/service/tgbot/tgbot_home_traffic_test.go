@@ -24,8 +24,16 @@ func TestHomeSummarySplitsUploadAndDownload(t *testing.T) {
 			tb := initReportDB(t)
 			localizeWithRealBundle(t)
 			for i := range tc.up {
-				ib := &model.Inbound{UserId: 1, Tag: "home-" + string(rune('a'+i)), Port: 9443 + i,
-					Protocol: model.VLESS, Enable: true, Settings: `{"clients":[]}`, Up: tc.up[i], Down: tc.down[i]}
+				ib := &model.Inbound{
+					UserId:   1,
+					Tag:      "home-" + string(rune('a'+i)),
+					Port:     9443 + i,
+					Protocol: model.VLESS,
+					Enable:   true,
+					Settings: `{"clients":[]}`,
+					Up:       tc.up[i],
+					Down:     tc.down[i],
+				}
 				if err := database.GetDB().Create(ib).Error; err != nil {
 					t.Fatal(err)
 				}
