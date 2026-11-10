@@ -1172,8 +1172,9 @@ delete_ports() {
             exit 1
         fi
 
-        # Split numbers into an array
-        IFS=',' read -ra RULE_NUMBERS <<< "$rule_numbers"
+        # ufw renumbers the rules after each delete, so go from the highest
+        # number down (and once per number) to keep the rest pointing at the listed rules.
+        mapfile -t RULE_NUMBERS < <(tr ',' '\n' <<< "$rule_numbers" | sort -rnu)
         for rule_number in "${RULE_NUMBERS[@]}"; do
             # Delete the rule by number
             ufw delete "$rule_number" || echo "Failed to delete rule number $rule_number"
