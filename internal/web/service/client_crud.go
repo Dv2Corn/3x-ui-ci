@@ -128,6 +128,7 @@ type ClientResetCycle struct {
 	Total           int64
 	Up              int64
 	Down            int64
+	ExpiryTime      int64
 }
 
 // Depleted reports a client the quota switched off. A reset restores that one;
@@ -136,9 +137,15 @@ func (c ClientResetCycle) Depleted() bool {
 	return c.Total > 0 && clampedTrafficAdd(c.Up, c.Down) >= c.Total
 }
 
+// quotaDisabled is Depleted for an unexpired client: the expiry alone keeps an
+// expired one off, as quotaDisabledInboundCond does for inbounds.
+func (c ClientResetCycle) quotaDisabled(nowMs int64) bool {
+	return c.Depleted() && (c.ExpiryTime <= 0 || c.ExpiryTime > nowMs)
+}
+
 func clientResetCycles(tx *gorm.DB) *gorm.DB {
 	return tx.Table("clients c").
-		Select("c.email, c.traffic_reset_day, c.enable, COALESCE(ct.total, 0) AS total, COALESCE(ct.up, 0) AS up, COALESCE(ct.down, 0) AS down").
+		Select("c.email, c.traffic_reset_day, c.enable, COALESCE(ct.total, 0) AS total, COALESCE(ct.up, 0) AS up, COALESCE(ct.down, 0) AS down, COALESCE(ct.expiry_time, 0) AS expiry_time").
 		Joins("LEFT JOIN client_traffics ct ON ct.email = c.email")
 }
 
@@ -155,7 +162,7 @@ func (s *ClientService) GetClientsByTrafficReset(period string) ([]ClientResetCy
 	return cycles, nil
 }
 
-// quotaDisabledEmails lists the disabled clients whose usage reached their quota,
+// quotaDisabledEmails lists the disabled, unexpired clients whose usage reached their quota,
 // only those in within unless it is nil. Read it before zeroing the counters,
 // which hides why a client is off.
 func quotaDisabledEmails(tx *gorm.DB, within []string) ([]string, error) {
@@ -180,8 +187,9 @@ func quotaDisabledEmails(tx *gorm.DB, within []string) ([]string, error) {
 		}
 	}
 	var emails []string
+	nowMs := time.Now().UnixMilli()
 	for _, c := range cycles {
-		if c.Depleted() && (in == nil || in[c.Email]) {
+		if c.quotaDisabled(nowMs) && (in == nil || in[c.Email]) {
 			emails = append(emails, c.Email)
 		}
 	}
