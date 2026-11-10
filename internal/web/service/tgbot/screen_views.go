@@ -137,7 +137,7 @@ func (t *Tgbot) screenDeplete(chatID int64) {
 	t.renderScreen(chatID, t.newScreen("deplete", body, rows...))
 }
 
-// depleteReport builds the exhausted/disabled summary as plain text.
+// depleteReport builds the exhausted/disabled summary as bot HTML.
 func (t *Tgbot) depleteReport() string {
 	trDiff, exDiff := t.depletionThresholds()
 	now := time.Now().Unix() * 1000
@@ -187,7 +187,7 @@ func (t *Tgbot) depleteReport() string {
 	body += t.I18nBot("tgbot.messages.disabled", "Disabled=="+strconv.Itoa(disabledClients))
 	body += t.I18nBot("tgbot.messages.depleteSoon", "Deplete=="+strconv.Itoa(exhaustedClients))
 	if clientLines.Len() > 0 {
-		body += "\n" + html.EscapeString(clientLines.String())
+		body += "\n" + clientLines.String()
 	}
 	body += t.I18nBot("tgbot.messages.refreshedOn", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
 	return body
