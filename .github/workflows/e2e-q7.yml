@@ -1,0 +1,27 @@
+name: e2e-q7
+
+on: pull_request
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Xray core (the version go.mod pins)
+        run: |
+          curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-64.zip
+          mkdir -p /tmp/xray && unzip -q /tmp/xray.zip -d /tmp/xray && /tmp/xray/xray version
+      - name: Build the panel
+        run: mkdir -p internal/web/dist && touch internal/web/dist/.gitkeep && go build -o /tmp/x-ui .
+      - name: Panel end to end
+        run: |
+          set -o pipefail
+          XUI_NODE_E2E_BINARY=/tmp/x-ui XUI_E2E_XRAY_DIR=/tmp/xray go test -tags lifecyclee2e -count=1 -timeout 10m -v -run '^TestE2ETrafficResetKeepsExpiredClientOff$' ./internal/nodee2e/ 2>&1 | tee /tmp/e2e.log
+          if grep -q -- '--- SKIP' /tmp/e2e.log; then echo "skipped"; exit 1; fi
