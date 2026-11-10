@@ -16,12 +16,12 @@ const (
 // StatsNotifyJob sends periodic statistics reports via Telegram bot.
 type StatsNotifyJob struct {
 	xrayService  service.XrayService
-	tgbotService tgbot.Tgbot
+	tgbotService interface{ SendReport() }
 }
 
 // NewStatsNotifyJob creates a new statistics notification job instance.
 func NewStatsNotifyJob() *StatsNotifyJob {
-	return new(StatsNotifyJob)
+	return &StatsNotifyJob{tgbotService: &tgbot.Tgbot{}}
 }
 
 // Run sends a statistics report via Telegram bot if Xray is running.
