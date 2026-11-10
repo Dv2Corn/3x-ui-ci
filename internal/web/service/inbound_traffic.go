@@ -166,17 +166,17 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 		return nil
 	}
 
-	dbClientTraffics, convertedExpiryByEmail, err := s.adjustTraffics(tx, dbClientTraffics)
-	if err != nil {
-		return err
-	}
-
 	// Index by email for O(N) merge.
 	trafficByEmail := make(map[string]*xray.ClientTraffic, len(traffics))
 	for i := range traffics {
 		if traffics[i] != nil {
 			trafficByEmail[traffics[i].Email] = traffics[i]
 		}
+	}
+
+	dbClientTraffics, convertedExpiryByEmail, err := s.adjustTraffics(tx, dbClientTraffics, trafficByEmail)
+	if err != nil {
+		return err
 	}
 	now := time.Now().UnixMilli()
 	// Use atomic per-row UPDATE instead of read-modify-write Save. tx.Save
@@ -257,7 +257,7 @@ func canonicalizeClientTraffic(tx *gorm.DB, traffics []*xray.ClientTraffic) ([]*
 	return result, nil
 }
 
-func (s *InboundService) adjustTraffics(tx *gorm.DB, dbClientTraffics []*xray.ClientTraffic) ([]*xray.ClientTraffic, map[string]int64, error) {
+func (s *InboundService) adjustTraffics(tx *gorm.DB, dbClientTraffics []*xray.ClientTraffic, polled map[string]*xray.ClientTraffic) ([]*xray.ClientTraffic, map[string]int64, error) {
 	now := time.Now().UnixMilli()
 
 	// "Start After First Use" stores a negative expiry (the duration). On the
@@ -266,6 +266,10 @@ func (s *InboundService) adjustTraffics(tx *gorm.DB, dbClientTraffics []*xray.Cl
 	// same value (recomputing per inbound would skip all but the first one).
 	newExpiryByEmail := make(map[string]int64, len(dbClientTraffics))
 	for traffic_index := range dbClientTraffics {
+		// The core reports every counter it holds, idle ones with a zero delta.
+		if t := polled[dbClientTraffics[traffic_index].Email]; t == nil || (t.Up == 0 && t.Down == 0) {
+			continue
+		}
 		if dbClientTraffics[traffic_index].ExpiryTime < 0 {
 			newExpiryByEmail[dbClientTraffics[traffic_index].Email] = now - dbClientTraffics[traffic_index].ExpiryTime
 		}
