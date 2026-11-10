@@ -1,0 +1,37 @@
+name: e2e-q5
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  malformed-peer-key:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build the panel, the helper and Xray from the module's xray-core
+        run: |
+          mkdir -p internal/web/dist /tmp/w/db /tmp/w/bin /tmp/w/log && touch internal/web/dist/.gitkeep
+          go build -o /tmp/x-ui .
+          go build -o /tmp/e2e ./_e2e/q5
+          go build -mod=mod -o /tmp/w/bin/xray-linux-amd64 github.com/xtls/xray-core/main
+          curl -fsSLo /tmp/w/bin/geoip.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
+          curl -fsSLo /tmp/w/bin/geosite.dat https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
+      - name: Seed a WireGuard and an AmneziaWG inbound, each with one malformed client key
+        run: /tmp/e2e seed /tmp/w/db/x-ui.db /tmp/w
+      - name: Start the panel
+        run: |
+          XUI_DB_FOLDER=/tmp/w/db XUI_BIN_FOLDER=/tmp/w/bin XUI_LOG_FOLDER=/tmp/w/log /tmp/x-ui run > /tmp/w/panel.log 2>&1 &
+          sleep 30
+          ss -lunp | grep -E ':(51820|51830)\b' || true
+          pgrep -a xray-linux || echo "xray is not running"
+      - name: Good clients complete a real handshake
+        run: |
+          ok=0
+          /tmp/e2e handshake 127.0.0.1:51830 "$(cat /tmp/w/awg.server.pub)" "$(cat /tmp/w/awg.client.priv)" 10.8.1.2 1 || ok=1
+          /tmp/e2e handshake 127.0.0.1:51820 "$(cat /tmp/w/wg.server.pub)" "$(cat /tmp/w/wg.client.priv)" 10.0.0.2 0 || ok=1
+          grep -iE 'malformed|invalid public key|amneziawg|xray.*(fail|error)|Failed to start' /tmp/w/panel.log /tmp/w/log/* 2>/dev/null | grep -v 'not-a-key' | tail -20 || true
+          exit $ok
