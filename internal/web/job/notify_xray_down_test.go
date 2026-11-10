@@ -4,11 +4,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/mhsanaei/3x-ui/v3/internal/config"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/dbtest"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service/discord"
@@ -17,7 +17,9 @@ import (
 // The scheduled Discord report and its backup were skipped while Xray was
 // down, exactly when the admin needs them.
 func TestDiscordNotifyJobSendsReportAndBackupWhileXrayIsDown(t *testing.T) {
-	dbtest.InitDB(t, filepath.Join(t.TempDir(), "x-ui.db"))
+	// The backup is taken next to config.GetDBPath(), so the test DB must live there.
+	t.Setenv("XUI_DB_FOLDER", t.TempDir())
+	dbtest.InitDB(t, config.GetDBPath())
 	if (&service.XrayService{}).IsXrayRunning() {
 		t.Fatal("test needs Xray to be down")
 	}
