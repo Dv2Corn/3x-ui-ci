@@ -1,7 +1,6 @@
 package job
 
 import (
-	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service/tgbot"
 )
 
@@ -15,19 +14,16 @@ const (
 
 // StatsNotifyJob sends periodic statistics reports via Telegram bot.
 type StatsNotifyJob struct {
-	xrayService  service.XrayService
-	tgbotService tgbot.Tgbot
+	tgbotService interface{ SendReport() }
 }
 
 // NewStatsNotifyJob creates a new statistics notification job instance.
 func NewStatsNotifyJob() *StatsNotifyJob {
-	return new(StatsNotifyJob)
+	return &StatsNotifyJob{tgbotService: &tgbot.Tgbot{}}
 }
 
-// Run sends a statistics report via Telegram bot if Xray is running.
+// Run sends the statistics report and the scheduled backup. It runs while Xray
+// is down too: the report shows Xray's state, and the backup does not need it.
 func (j *StatsNotifyJob) Run() {
-	if !j.xrayService.IsXrayRunning() {
-		return
-	}
 	j.tgbotService.SendReport()
 }
