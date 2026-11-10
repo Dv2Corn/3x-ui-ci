@@ -530,3 +530,66 @@ func TestUpdateInboundClientIps_AllowlistedIpIsNeitherCountedNorBanned(t *testin
 		}
 	}
 }
+
+// seedClientBehindDisabledInbound attaches email to a disabled inbound and to an enabled
+// one with a higher id, as after moving a client off an inbound that was switched off.
+func seedClientBehindDisabledInbound(t *testing.T, email string) (disabled, enabled *model.Inbound) {
+	t.Helper()
+	db := database.GetDB()
+	disabled = seedLinkedInboundWithClient(t, "disabled-first", email, 1)
+	if err := db.Model(disabled).Update("enable", false).Error; err != nil {
+		t.Fatalf("disable inbound: %v", err)
+	}
+	enabled = &model.Inbound{Tag: "enabled-second", Enable: true, Protocol: model.VLESS, Port: 4322, Settings: disabled.Settings}
+	if err := db.Create(enabled).Error; err != nil {
+		t.Fatalf("seed enabled inbound: %v", err)
+	}
+	var client model.ClientRecord
+	if err := db.Where("email = ?", email).First(&client).Error; err != nil {
+		t.Fatalf("read client: %v", err)
+	}
+	if err := db.Create(&model.ClientInbound{ClientId: client.Id, InboundId: enabled.Id}).Error; err != nil {
+		t.Fatalf("link enabled inbound: %v", err)
+	}
+	return disabled, enabled
+}
+
+func TestOwningInboundPrefersEnabledOverLowerId(t *testing.T) {
+	const email = "disabled-first@x"
+	resolvers := map[string]func(t *testing.T, j *CheckClientIpJob) int{
+		"batch scan": func(_ *testing.T, j *CheckClientIpJob) int { return j.loadInboundsByEmails([]string{email})[email].Id },
+		"per email": func(t *testing.T, j *CheckClientIpJob) int {
+			ib, err := j.getInboundByEmail(email)
+			if err != nil {
+				t.Fatalf("getInboundByEmail: %v", err)
+			}
+			return ib.Id
+		},
+	}
+	for name, resolve := range resolvers {
+		t.Run(name, func(t *testing.T) {
+			setupIntegrationDB(t)
+			_, enabled := seedClientBehindDisabledInbound(t, email)
+			if got := resolve(t, NewCheckClientIpJob()); got != enabled.Id {
+				t.Fatalf("resolved inbound %d, want the enabled inbound %d", got, enabled.Id)
+			}
+		})
+	}
+}
+
+// The limit was skipped for such a client: its owning inbound resolved to the disabled one.
+func TestProcessObserved_EnforcesLimitWhenLowerIdInboundIsDisabled(t *testing.T) {
+	setupIntegrationDB(t)
+	const email = "disabled-first@x"
+	seedClientBehindDisabledInbound(t, email)
+	now := time.Now().Unix()
+	seedClientIps(t, email, []model.ClientIpEntry{{IP: "198.51.100.30", Timestamp: now - 2}})
+
+	NewCheckClientIpJob().processObserved(map[string]map[string]int64{
+		email: {"198.51.100.30": now - 1, "198.51.100.31": now},
+	}, true, true)
+
+	if got := banLineCount(t, email); got != 1 {
+		t.Fatalf("ban lines = %d, want 1 for limitIp=1 with two live addresses", got)
+	}
+}

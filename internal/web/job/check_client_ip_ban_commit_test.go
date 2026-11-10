@@ -236,7 +236,7 @@ func TestPublishBans_WithholdsAddressesOnlyADatagramVouchesFor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setupIntegrationDB(t)
 			db := database.GetDB()
-			// The scan resolves a client to its lowest inbound id, which is this one.
+			// The scan resolves a client to its lowest enabled inbound id, which is this one.
 			inbound := seedLinkedInboundWithClient(t, "inbound-vless", email, 1)
 			if tc.second != nil {
 				tc.second.Tag, tc.second.Port, tc.second.Protocol = "inbound-ss", 4322, model.Shadowsocks
