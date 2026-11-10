@@ -1,0 +1,35 @@
+name: e2e-q12
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  dead-external-subscription:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build the panel and the helper
+        run: |
+          mkdir -p internal/web/dist && touch internal/web/dist/.gitkeep
+          go build -o /tmp/x-ui .
+          go build -o /tmp/e2e ./_e2e/q12
+      - name: Seed a client whose subscription has two dead external providers
+        run: |
+          mkdir -p /tmp/w/db /tmp/w/bin /tmp/w/log
+          /tmp/e2e hang 127.0.0.1:18080 &
+          /tmp/e2e seed /tmp/w/db/x-ui.db
+      - name: Start the panel and time subscription requests
+        run: |
+          XUI_DB_FOLDER=/tmp/w/db XUI_BIN_FOLDER=/tmp/w/bin XUI_LOG_FOLDER=/tmp/w/log /tmp/x-ui run > /tmp/w/panel.log 2>&1 &
+          for i in $(seq 60); do curl -s -o /dev/null http://127.0.0.1:2096/ && break; sleep 1; done
+          fail=0
+          for i in 1 2 3 4; do
+            out=$(curl -s -m 60 -o /tmp/w/body.$i -w '%{http_code} %{time_total}' http://127.0.0.1:2096/sub/e2esub)
+            echo "request $i: HTTP ${out% *}, ${out#* } s, $(base64 -d /tmp/w/body.$i 2>/dev/null | grep -c '^vless://') static link(s)"
+            if [ "$i" -gt 1 ] && awk -v t="${out#* }" 'BEGIN{exit !(t > 2)}'; then fail=1; fi
+          done
+          if [ "$fail" = 1 ]; then echo "::error::requests after the first still waited for the dead providers"; tail -20 /tmp/w/panel.log; exit 1; fi
