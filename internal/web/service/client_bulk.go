@@ -466,6 +466,27 @@ func (s *ClientService) BulkAdjust(inboundSvc *InboundService, emails []string, 
 		emailsByInbound[m.InboundId] = append(emailsByInbound[m.InboundId], email)
 	}
 
+	// Read before the adjust below stamps the records, which would make an
+	// operator's earlier disable look like the lifecycle job's.
+	candidateEmails := make([]string, 0, len(plan))
+	for email, entry := range plan {
+		if entry.applyExpiry || entry.applyTotal {
+			candidateEmails = append(candidateEmails, email)
+		}
+	}
+	var switchedOff []xray.ClientTraffic
+	for _, batch := range chunkStrings(candidateEmails, sqlInChunk) {
+		var rows []xray.ClientTraffic
+		if err := db.Where("enable = ? AND email IN ?", false, batch).Find(&rows).Error; err != nil {
+			return result, false, err
+		}
+		switchedOff = append(switchedOff, rows...)
+	}
+	wasDisabledDepleted, err := lifecycleDisabledEmails(db, switchedOff)
+	if err != nil {
+		return result, false, err
+	}
+
 	needRestart := false
 	flowHonored := map[string]bool{}
 	flowIneligible := map[string]bool{}
@@ -507,26 +528,6 @@ func (s *ClientService) BulkAdjust(inboundSvc *InboundService, emails []string, 
 			if _, already := skippedReasons[email]; !already {
 				skippedReasons[email] = reason
 			}
-		}
-	}
-
-	cond, condArgs := depletedCond(db)
-	candidateEmails := make([]string, 0, len(plan))
-	for email, entry := range plan {
-		if entry.applyExpiry || entry.applyTotal {
-			candidateEmails = append(candidateEmails, email)
-		}
-	}
-	wasDisabledDepleted := map[string]struct{}{}
-	for _, batch := range chunkStrings(candidateEmails, sqlInChunk) {
-		var rows []string
-		if err := db.Model(xray.ClientTraffic{}).
-			Where(cond+" AND enable = ? AND email IN ?", append(append([]any{}, condArgs...), false, batch)...).
-			Pluck("email", &rows).Error; err != nil {
-			return result, needRestart, err
-		}
-		for _, e := range rows {
-			wasDisabledDepleted[e] = struct{}{}
 		}
 	}
 
@@ -604,6 +605,7 @@ func (s *ClientService) BulkAdjust(inboundSvc *InboundService, emails []string, 
 	}
 
 	if len(wasDisabledDepleted) > 0 {
+		cond, condArgs := depletedCond(db)
 		stillDepleted := map[string]struct{}{}
 		wasList := make([]string, 0, len(wasDisabledDepleted))
 		for e := range wasDisabledDepleted {

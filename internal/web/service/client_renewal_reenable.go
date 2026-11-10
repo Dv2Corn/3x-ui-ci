@@ -20,11 +20,10 @@ func (s *ClientService) renewalReenables(email string, newTotal, newExpiry int64
 		return false
 	}
 
-	cond, condArgs := depletedCond(db)
-	var wasDepleted int64
-	if err := db.Model(xray.ClientTraffic{}).
-		Where(cond+" AND email = ?", append(append([]any{}, condArgs...), email)...).
-		Count(&wasDepleted).Error; err != nil || wasDepleted == 0 {
+	// An operator's disable before the deadline does not count once it passes,
+	// the rule autoRenewClients follows.
+	lifecycle, err := lifecycleDisabledEmails(db, []xray.ClientTraffic{traffic})
+	if _, ok := lifecycle[email]; err != nil || !ok {
 		return false // off for another reason than depletion: the operator's off stands
 	}
 

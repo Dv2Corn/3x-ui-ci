@@ -282,3 +282,52 @@ func TestResetTrafficByEmail_ReenablesEveryInboundOfTheClient(t *testing.T) {
 		t.Fatalf("%s: traffic row enable=%v used=%d, want enabled at 0", email, got.Enable, got.Up+got.Down)
 	}
 }
+
+// The operator switched the client off while it was live; its deadline passing
+// later must not let a renewal on any route turn it back on.
+func TestRenewal_KeepsDisabled_ManuallyDisabledThenExpired(t *testing.T) {
+	renewals := []struct {
+		name string
+		run  func(svc *ClientService, inboundSvc *InboundService, email string, expiry int64) error
+	}{
+		{"update", func(svc *ClientService, inboundSvc *InboundService, email string, expiry int64) error {
+			rec, err := svc.GetRecordByEmail(nil, email)
+			if err != nil {
+				return err
+			}
+			updated := rec.ToClient()
+			updated.ExpiryTime = expiry
+			_, err = svc.Update(inboundSvc, rec.Id, *updated, 0)
+			return err
+		}},
+		{"expiry setter", func(svc *ClientService, inboundSvc *InboundService, email string, expiry int64) error {
+			_, err := svc.ResetClientExpiryTimeByEmail(inboundSvc, email, expiry)
+			return err
+		}},
+		{"bulk adjust", func(svc *ClientService, inboundSvc *InboundService, email string, _ int64) error {
+			_, _, err := svc.BulkAdjust(inboundSvc, []string{email}, 30, 0, "", nil, "")
+			return err
+		}},
+	}
+	for i, renewal := range renewals {
+		t.Run(renewal.name, func(t *testing.T) {
+			setupBulkDB(t)
+			svc := &ClientService{}
+			inboundSvc := &InboundService{}
+
+			now := time.Now().UnixMilli()
+			email := "renew-manual-expired@x"
+			ib := seedRenewableDepletedClient(t, svc, 53120+i, email, 0, now-2*renewalReenableDay, 0, 0)
+			// The operator's disable stamped the record before the deadline.
+			if err := database.GetDB().Model(&model.ClientRecord{}).Where("email = ?", email).
+				UpdateColumn("updated_at", now-3*renewalReenableDay).Error; err != nil {
+				t.Fatalf("stamp record: %v", err)
+			}
+
+			if err := renewal.run(svc, inboundSvc, email, now+30*renewalReenableDay); err != nil {
+				t.Fatalf("renewal: %v", err)
+			}
+			assertEnableEverywhere(t, svc, inboundSvc, ib.Id, email, false)
+		})
+	}
+}
