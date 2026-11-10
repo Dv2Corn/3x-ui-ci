@@ -209,27 +209,32 @@ func (j *CheckClientIpJob) loadClientLimits(emails []string) map[string]int {
 }
 
 // loadInboundsByEmails resolves each email's owning inbound through the
-// clients/client_inbounds relation in chunked queries. Like the old per-email
-// First() it keeps the lowest inbound id when a client spans several inbounds.
+// clients/client_inbounds relation in chunked queries. Like getInboundByEmail it
+// keeps the lowest enabled inbound id, and the lowest id only when none is enabled.
 func (j *CheckClientIpJob) loadInboundsByEmails(emails []string) map[string]*model.Inbound {
 	db := database.GetDB()
 	minInboundByEmail := make(map[string]int, len(emails))
+	enabledByEmail := make(map[string]bool, len(emails))
 	for _, batch := range chunkEmails(emails, ipScanChunk) {
 		var pairs []struct {
 			Email     string
 			InboundId int
+			Enable    bool
 		}
 		if err := db.Table("client_inbounds").
-			Select("clients.email AS email, client_inbounds.inbound_id AS inbound_id").
+			Select("clients.email AS email, client_inbounds.inbound_id AS inbound_id, inbounds.enable AS enable").
 			Joins("JOIN clients ON clients.id = client_inbounds.client_id").
+			Joins("JOIN inbounds ON inbounds.id = client_inbounds.inbound_id").
 			Where("clients.email IN ?", batch).
 			Scan(&pairs).Error; err != nil {
 			j.checkError(err)
 			return nil
 		}
 		for _, p := range pairs {
-			if cur, ok := minInboundByEmail[p.Email]; !ok || p.InboundId < cur {
+			cur, ok := minInboundByEmail[p.Email]
+			if !ok || (p.Enable && !enabledByEmail[p.Email]) || (p.Enable == enabledByEmail[p.Email] && p.InboundId < cur) {
 				minInboundByEmail[p.Email] = p.InboundId
+				enabledByEmail[p.Email] = p.Enable
 			}
 		}
 	}
@@ -921,7 +926,8 @@ func getAPIPortFromConfigData(configData []byte) (int, error) {
 // %email%" can match the wrong inbound (an email that is a substring of another,
 // or text that merely appears elsewhere in the settings JSON). The LIKE + JSON
 // scan stays only as a fallback for clients not yet present in the relation, so
-// nothing regresses when the join finds no row.
+// nothing regresses when the join finds no row. An enabled inbound wins over a lower
+// id: the limit is only enforced on an enabled one.
 func (j *CheckClientIpJob) getInboundByEmail(clientEmail string) (*model.Inbound, error) {
 	db := database.GetDB()
 	inbound := &model.Inbound{}
@@ -930,13 +936,14 @@ func (j *CheckClientIpJob) getInboundByEmail(clientEmail string) (*model.Inbound
 		Joins("JOIN client_inbounds ON client_inbounds.inbound_id = inbounds.id").
 		Joins("JOIN clients ON clients.id = client_inbounds.client_id").
 		Where("clients.email = ?", clientEmail).
+		Order("inbounds.enable DESC").
 		First(inbound).Error
 	if err == nil {
 		return inbound, nil
 	}
 
 	var candidates []model.Inbound
-	if listErr := db.Model(&model.Inbound{}).Where("settings LIKE ?", "%"+clientEmail+"%").Find(&candidates).Error; listErr != nil {
+	if listErr := db.Model(&model.Inbound{}).Where("settings LIKE ?", "%"+clientEmail+"%").Order("enable DESC, id").Find(&candidates).Error; listErr != nil {
 		return nil, listErr
 	}
 	for i := range candidates {
