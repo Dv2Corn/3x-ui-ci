@@ -1,0 +1,28 @@
+name: e2e-q2
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build base and head panels
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash .github/e2e/build.sh
+      - name: Run the panel and curl it (base, then head)
+        env:
+          BEFORE: /tmp/bin/x-ui-before
+          AFTER: /tmp/bin/x-ui-after
+          T: /tmp/bin/e2etool
+        run: bash .github/e2e/e2e.sh domain
+      - name: Panel log
+        if: always()
+        run: tail -50 /tmp/e2e/run.log || true
