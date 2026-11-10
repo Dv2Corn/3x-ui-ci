@@ -103,3 +103,35 @@ func TestCheckValidSchedules(t *testing.T) {
 		}
 	}
 }
+
+// Panel and subscription domains are stored in the form they are compared with
+// the request host, and values that could never match one are refused.
+func TestCheckValidDomains(t *testing.T) {
+	cases := []struct {
+		in, want string
+		wantErr  bool
+	}{
+		{in: "", want: ""},
+		{in: "panel.example.com", want: "panel.example.com"},
+		{in: " Panel.Example.COM. ", want: "panel.example.com"},
+		{in: "bücher.example", want: "xn--bcher-kva.example"},
+		{in: "203.0.113.10", want: "203.0.113.10"},
+		{in: "[2001:DB8::1]", want: "2001:db8::1"},
+		{in: "https://panel.example.com", wantErr: true},
+		{in: "panel.example.com:2053", wantErr: true},
+		{in: "panel.example.com/panel", wantErr: true},
+		{in: "panel example.com", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			s := &AllSetting{WebPort: 2053, SubPort: 2096, WebDomain: tc.in, SubDomain: tc.in}
+			err := s.CheckValid()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("CheckValid(%q) error = %v, wantErr %v", tc.in, err, tc.wantErr)
+			}
+			if err == nil && (s.WebDomain != tc.want || s.SubDomain != tc.want) {
+				t.Fatalf("CheckValid(%q) stored web %q, sub %q; want %q", tc.in, s.WebDomain, s.SubDomain, tc.want)
+			}
+		})
+	}
+}
