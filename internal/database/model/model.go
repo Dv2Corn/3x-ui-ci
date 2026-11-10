@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/util/json_util"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/wireguard"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 )
 
@@ -487,9 +488,16 @@ func MasqueClientsToCore(settings string) (string, bool) {
 // full-config path (XrayService.GetXrayConfig) and the live AddInbound path
 // (WireguardClientsToPeers), so both emit identical peers. The client's
 // privateKey is intentionally omitted — it is the client's secret, not part of
-// the server-side peer.
-func WireguardPeerFromClient(c Client) map[string]any {
-	peer := map[string]any{"email": c.Email, "level": 0}
+// the server-side peer. ok is false for a malformed key: xray-core would refuse the
+// whole config over it, taking every inbound down with this one client.
+func WireguardPeerFromClient(c Client) (peer map[string]any, ok bool) {
+	if _, err := wireguard.KeyToHex(c.PublicKey); err != nil {
+		return nil, false
+	}
+	if _, err := wireguard.KeyToHex(c.PreSharedKey); err != nil {
+		return nil, false
+	}
+	peer = map[string]any{"email": c.Email, "level": 0}
 	if c.PublicKey != "" {
 		peer["publicKey"] = c.PublicKey
 	}
@@ -502,7 +510,7 @@ func WireguardPeerFromClient(c Client) map[string]any {
 	if ka := c.KeepAliveSeconds(); ka > 0 {
 		peer["keepAlive"] = ka
 	}
-	return peer
+	return peer, true
 }
 
 // WireguardClientsToPeers rewrites a WireGuard inbound's settings JSON from the
@@ -546,7 +554,9 @@ func WireguardClientsToPeers(settings string) (string, bool) {
 		if err := json.Unmarshal(encoded, &c); err != nil {
 			continue
 		}
-		peers = append(peers, WireguardPeerFromClient(c))
+		if peer, ok := WireguardPeerFromClient(c); ok {
+			peers = append(peers, peer)
+		}
 	}
 	delete(parsed, "clients")
 	parsed["peers"] = peers

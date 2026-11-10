@@ -1,6 +1,7 @@
 package amneziawgkern
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"testing"
@@ -26,7 +27,7 @@ func testInstance() amneziawg.Instance {
 		},
 		Peers: []amneziawg.Peer{
 			{Email: "alice", PublicKey: "peerAPublicKeyBase64ValueForTestsPadding000=", AllowedIPs: []string{"10.8.1.2/32"}},
-			{Email: "bob", PublicKey: "peerBPublicKeyBase64ValueForTestsPadding000=", AllowedIPs: []string{"10.8.1.3/32"}, PresharedKey: "pskBase64ValueForTestingOnlyPaddingXXXXXXX="},
+			{Email: "bob", PublicKey: "peerBPublicKeyBase64ValueForTestsPadding000=", AllowedIPs: []string{"10.8.1.3/32"}, PresharedKey: "pskBase64ValueForTestingOnlyPaddingXXXXXXXU="},
 		},
 	}
 }
@@ -46,7 +47,7 @@ func TestRenderEmitsOnlySetconfKeys(t *testing.T) {
 		"ContentPaddingAddition = 14-47\n",
 		"RandomTrailers = on\n", "DisableCookies = on\n",
 		"# alice\nPublicKey = peerAPublicKeyBase64ValueForTestsPadding000=\nAllowedIPs = 10.8.1.2/32\n",
-		"PresharedKey = pskBase64ValueForTestingOnlyPaddingXXXXXXX=\n",
+		"PresharedKey = pskBase64ValueForTestingOnlyPaddingXXXXXXXU=\n",
 	} {
 		if !strings.Contains(conf, want) {
 			t.Errorf("rendered config lacks %q:\n%s", want, conf)
@@ -251,5 +252,36 @@ func TestOwnershipGrammarRefusesForeignConfigs(t *testing.T) {
 		if validOwnedConfig(body, name) {
 			t.Errorf("%s: ownership grammar accepted a config Render never writes", label)
 		}
+	}
+}
+
+// awg syncconf refuses the whole file over one malformed key and reads only padded
+// standard base64, so every other client's change stopped reaching the interface.
+func TestRenderLeavesOutPeerWithMalformedKey(t *testing.T) {
+	const alice = "peerAPublicKeyBase64ValueForTestsPadding000="
+	aliceHex := hex.EncodeToString([]byte(strings.Repeat("A", 32)))
+	for _, tc := range []struct {
+		name string
+		peer amneziawg.Peer
+		want string // the [Peer] block rendered for it; empty when it is left out
+	}{
+		{"malformed public key", amneziawg.Peer{Email: "carol", PublicKey: "not-a-key", AllowedIPs: []string{"10.8.1.4/32"}}, ""},
+		{"malformed preshared key", amneziawg.Peer{Email: "carol", PublicKey: alice, PresharedKey: "short=", AllowedIPs: []string{"10.8.1.4/32"}}, ""},
+		{"hex public key", amneziawg.Peer{Email: "carol", PublicKey: aliceHex, AllowedIPs: []string{"10.8.1.4/32"}}, "# carol\nPublicKey = QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := testInstance()
+			inst.Peers = append(inst.Peers, tc.peer)
+			conf, err := Render(inst)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			if !strings.Contains(conf, "# alice\n") || !strings.Contains(conf, "# bob\n") {
+				t.Fatalf("valid peers were dropped:\n%s", conf)
+			}
+			if tc.want == "" && strings.Contains(conf, "# carol") || tc.want != "" && !strings.Contains(conf, tc.want) {
+				t.Fatalf("peer carol rendered wrong, want %q:\n%s", tc.want, conf)
+			}
+		})
 	}
 }

@@ -315,7 +315,11 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 						c.KeepAlive = &keepalive
 					}
 				}
-				wgPeers = append(wgPeers, model.WireguardPeerFromClient(c))
+				if peer, ok := model.WireguardPeerFromClient(c); ok {
+					wgPeers = append(wgPeers, peer)
+				} else {
+					logger.Warningf("wireguard inbound %s: client %q has a malformed key and is left out", inbound.Tag, c.Email)
+				}
 				continue
 			}
 			finalClients = append(finalClients, entry)

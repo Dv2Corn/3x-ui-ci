@@ -13,6 +13,7 @@ import (
 
 	"github.com/mhsanaei/3x-ui/v3/internal/amneziawg"
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/wireguard"
 )
 
 // interfacePrefix keeps panel interfaces out of the awg0/awg1 names operators
@@ -125,16 +126,20 @@ func Render(inst amneziawg.Instance) (string, error) {
 	writeObfuscation(&b, inst.Obfuscation)
 
 	for _, p := range inst.Peers {
-		if p.PublicKey == "" || len(p.AllowedIPs) == 0 {
+		// awg syncconf refuses the whole file over one malformed key, and reads only
+		// padded standard base64, so keys are rewritten in that form or the peer is left out.
+		publicKey, pubErr := wireguard.KeyToBase64(p.PublicKey)
+		presharedKey, pskErr := wireguard.KeyToBase64(p.PresharedKey)
+		if pubErr != nil || pskErr != nil || publicKey == "" || len(p.AllowedIPs) == 0 {
 			continue
 		}
 		b.WriteString("\n[Peer]\n")
 		if p.Email != "" {
 			fmt.Fprintf(&b, "# %s\n", p.Email)
 		}
-		fmt.Fprintf(&b, "PublicKey = %s\n", p.PublicKey)
-		if p.PresharedKey != "" {
-			fmt.Fprintf(&b, "PresharedKey = %s\n", p.PresharedKey)
+		fmt.Fprintf(&b, "PublicKey = %s\n", publicKey)
+		if presharedKey != "" {
+			fmt.Fprintf(&b, "PresharedKey = %s\n", presharedKey)
 		}
 		fmt.Fprintf(&b, "AllowedIPs = %s\n", strings.Join(p.AllowedIPs, ", "))
 	}

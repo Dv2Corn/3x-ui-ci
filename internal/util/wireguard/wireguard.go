@@ -62,6 +62,19 @@ func KeyToHex(key string) (string, error) {
 	return hex.EncodeToString(raw[:]), nil
 }
 
+// KeyToBase64 returns a key in the padded standard base64 form wg and awg config
+// files require; it accepts every form KeyToHex does, and an empty key stays empty.
+func KeyToBase64(key string) (string, error) {
+	if key == "" {
+		return "", nil
+	}
+	raw, err := decodeWireguardKey(key)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(raw[:]), nil
+}
+
 // decodeWireguardKey accepts a 64-char hex key or a base64 key (standard or
 // URL-safe alphabet, with or without padding) and returns the raw 32 bytes.
 func decodeWireguardKey(key string) ([32]byte, error) {

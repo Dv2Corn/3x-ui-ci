@@ -249,16 +249,15 @@ func buildUAPIConfig(inst amneziawg.Instance, opts DeviceOptions) (string, error
 	fmt.Fprintf(&b, "disable_cookies=%t\n", opts.DisableCookies)
 
 	for _, p := range inst.Peers {
-		pubHex, err := wireguard.KeyToHex(p.PublicKey)
-		if err != nil {
-			return "", fmt.Errorf("peer %q: invalid public key: %w", p.Email, err)
+		// A malformed key fails the whole IpcSet, so every other client's change
+		// would stop reaching the device; that peer is left out instead.
+		pubHex, pubErr := wireguard.KeyToHex(p.PublicKey)
+		pskHex, pskErr := wireguard.KeyToHex(p.PresharedKey)
+		if pubErr != nil || pskErr != nil || pubHex == "" {
+			continue
 		}
 		fmt.Fprintf(&b, "public_key=%s\n", pubHex)
-		if p.PresharedKey != "" {
-			pskHex, err := wireguard.KeyToHex(p.PresharedKey)
-			if err != nil {
-				return "", fmt.Errorf("peer %q: invalid preshared key: %w", p.Email, err)
-			}
+		if pskHex != "" {
 			fmt.Fprintf(&b, "preshared_key=%s\n", pskHex)
 		}
 		for _, allowedIP := range p.AllowedIPs {

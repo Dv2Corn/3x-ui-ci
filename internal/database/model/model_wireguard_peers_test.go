@@ -19,8 +19,9 @@ func TestWireguardClientsToPeers(t *testing.T) {
 		"secretKey": "c2VydmVyLXNlY3JldC1rZXktYmFzZTY0LTMyYnl0ZXM=",
 		"mtu": 1420,
 		"clients": [
-			{"email": "alice", "enable": true, "publicKey": "cHVi", "allowedIPs": ["10.0.0.2/32"], "preSharedKey": "cHNr", "keepAlive": 25},
-			{"email": "bob", "enable": false, "publicKey": "cHViMg==", "allowedIPs": ["10.0.0.3/32"]}
+			{"email": "alice", "enable": true, "publicKey": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=", "allowedIPs": ["10.0.0.2/32"], "preSharedKey": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=", "keepAlive": 25},
+			{"email": "bob", "enable": false, "publicKey": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=", "allowedIPs": ["10.0.0.3/32"]},
+			{"email": "carol", "enable": true, "publicKey": "not-a-key", "allowedIPs": ["10.0.0.4/32"]}
 		]
 	}`
 
@@ -42,15 +43,15 @@ func TestWireguardClientsToPeers(t *testing.T) {
 		t.Fatalf("peers not an array: %T", parsed["peers"])
 	}
 	if len(peers) != 1 {
-		t.Fatalf("peers length = %d, want 1 (disabled client must be skipped)", len(peers))
+		t.Fatalf("peers length = %d, want 1 (disabled client and malformed key skipped)", len(peers))
 	}
 
 	peer := peers[0].(map[string]any)
-	if peer["publicKey"] != "cHVi" {
-		t.Errorf("peer publicKey = %v, want cHVi", peer["publicKey"])
+	if peer["publicKey"] != "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=" {
+		t.Errorf("peer publicKey = %v, want alice's", peer["publicKey"])
 	}
-	if peer["preSharedKey"] != "cHNr" {
-		t.Errorf("peer preSharedKey = %v, want cHNr", peer["preSharedKey"])
+	if peer["preSharedKey"] != "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=" {
+		t.Errorf("peer preSharedKey = %v, want alice's", peer["preSharedKey"])
 	}
 	if peer["keepAlive"].(float64) != 25 {
 		t.Errorf("peer keepAlive = %v, want 25", peer["keepAlive"])
@@ -78,7 +79,7 @@ func TestGenXrayInboundConfigWireguardConvertsPeers(t *testing.T) {
 		Protocol: WireGuard,
 		Port:     51820,
 		Tag:      "wg-in",
-		Settings: `{"secretKey": "k", "peers": [], "clients": [{"email": "alice", "enable": true, "publicKey": "cHVi", "allowedIPs": ["10.0.0.2/32"]}]}`,
+		Settings: `{"secretKey": "k", "peers": [], "clients": [{"email": "alice", "enable": true, "publicKey": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=", "allowedIPs": ["10.0.0.2/32"]}]}`,
 	}
 
 	cfg := ib.GenXrayInboundConfig()
@@ -91,7 +92,7 @@ func TestGenXrayInboundConfigWireguardConvertsPeers(t *testing.T) {
 	if !ok || len(peers) != 1 {
 		t.Fatalf("GenXrayInboundConfig did not emit peers: %v", parsed["peers"])
 	}
-	if peers[0].(map[string]any)["publicKey"] != "cHVi" {
-		t.Errorf("peer publicKey = %v, want cHVi", peers[0].(map[string]any)["publicKey"])
+	if peers[0].(map[string]any)["publicKey"] != "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=" {
+		t.Errorf("peer publicKey = %v, want alice's", peers[0].(map[string]any)["publicKey"])
 	}
 }

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"testing"
@@ -9,6 +10,12 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/json_util"
 )
+
+// wgTestKey derives a well-formed key from a label: a malformed peer key is left out.
+func wgTestKey(label string) string {
+	sum := sha256.Sum256([]byte(label))
+	return base64.StdEncoding.EncodeToString(sum[:])
+}
 
 func wgTestSecretKey() string {
 	return base64.StdEncoding.EncodeToString(make([]byte, 32))
@@ -65,15 +72,15 @@ func seedDualTunnelClient(t *testing.T, enabled bool, wgKeepAlive *model.KeepAli
 	wgClient := model.Client{
 		Email:        email,
 		Enable:       true,
-		PublicKey:    "pub-wg",
+		PublicKey:    wgTestKey("pub-wg"),
 		AllowedIPs:   []string{"10.0.0.5/32"},
-		PreSharedKey: "wg-psk",
+		PreSharedKey: wgTestKey("wg-psk"),
 		KeepAlive:    wgKeepAlive,
 	}
 	awgClient := wgClient
-	awgClient.PublicKey = "pub-awg"
+	awgClient.PublicKey = wgTestKey("pub-awg")
 	awgClient.AllowedIPs = []string{"10.8.1.5/32"}
-	awgClient.PreSharedKey = "awg-psk"
+	awgClient.PreSharedKey = wgTestKey("awg-psk")
 	awgClient.KeepAlive = model.KeepAlivePtr(25)
 
 	wgSettings, err := json.Marshal(map[string]any{
@@ -135,8 +142,8 @@ func wgPeerList(t *testing.T, settings map[string]any) []map[string]any {
 
 func TestGetXrayConfigWireGuardPeers(t *testing.T) {
 	clients := []model.Client{
-		{Email: "alice@wg.test", Enable: true, PublicKey: "pub-alice", AllowedIPs: []string{"10.0.0.2/32"}, KeepAlive: model.KeepAlivePtr(25)},
-		{Email: "bob@wg.test", Enable: true, PublicKey: "pub-bob", AllowedIPs: []string{"10.0.0.3/32"}},
+		{Email: "alice@wg.test", Enable: true, PublicKey: wgTestKey("pub-alice"), AllowedIPs: []string{"10.0.0.2/32"}, KeepAlive: model.KeepAlivePtr(25)},
+		{Email: "bob@wg.test", Enable: true, PublicKey: wgTestKey("pub-bob"), AllowedIPs: []string{"10.0.0.3/32"}},
 	}
 	seedWGInbound(t, "wg-multi", 51820, clients)
 
@@ -176,8 +183,8 @@ func TestGetXrayConfigWireGuardPeers(t *testing.T) {
 
 func TestGetXrayConfigWireGuardDisabledClientExcluded(t *testing.T) {
 	clients := []model.Client{
-		{Email: "on@wg.test", Enable: true, PublicKey: "pub-on", AllowedIPs: []string{"10.0.0.2/32"}},
-		{Email: "off@wg.test", Enable: true, PublicKey: "pub-off", AllowedIPs: []string{"10.0.0.3/32"}},
+		{Email: "on@wg.test", Enable: true, PublicKey: wgTestKey("pub-on"), AllowedIPs: []string{"10.0.0.2/32"}},
+		{Email: "off@wg.test", Enable: true, PublicKey: wgTestKey("pub-off"), AllowedIPs: []string{"10.0.0.3/32"}},
 	}
 	seedWGInbound(t, "wg-disabled", 51821, clients)
 
@@ -202,7 +209,7 @@ func TestGetXrayConfigWireGuardUsesInboundLocalTunnelFields(t *testing.T) {
 	if err := database.GetDB().Where("email = ?", email).First(&shared).Error; err != nil {
 		t.Fatalf("read shared client: %v", err)
 	}
-	if shared.AllowedIPs != "10.8.1.5/32" || shared.PreSharedKey != "awg-psk" || shared.PublicKey != "pub-awg" || shared.KeepAlive.Seconds() != 25 {
+	if shared.AllowedIPs != "10.8.1.5/32" || shared.PreSharedKey != wgTestKey("awg-psk") || shared.PublicKey != wgTestKey("pub-awg") || shared.KeepAlive.Seconds() != 25 {
 		t.Fatalf("test setup did not persist AmneziaWG identity: allowedIPs=%q preSharedKey=%q publicKey=%q keepAlive=%d", shared.AllowedIPs, shared.PreSharedKey, shared.PublicKey, shared.KeepAlive.Seconds())
 	}
 
@@ -214,10 +221,10 @@ func TestGetXrayConfigWireGuardUsesInboundLocalTunnelFields(t *testing.T) {
 	if !ok || len(allowed) != 1 || allowed[0] != "10.0.0.5/32" {
 		t.Fatalf("WireGuard peer allowedIPs = %v, want [10.0.0.5/32]", peers[0]["allowedIPs"])
 	}
-	if peers[0]["preSharedKey"] != "wg-psk" {
-		t.Fatalf("WireGuard peer preSharedKey = %v, want wg-psk", peers[0]["preSharedKey"])
+	if peers[0]["preSharedKey"] != wgTestKey("wg-psk") {
+		t.Fatalf("WireGuard peer preSharedKey = %v, want the WireGuard key", peers[0]["preSharedKey"])
 	}
-	if peers[0]["publicKey"] != "pub-wg" {
+	if peers[0]["publicKey"] != wgTestKey("pub-wg") {
 		t.Fatalf("WireGuard peer publicKey = %v, want pub-wg", peers[0]["publicKey"])
 	}
 	if peers[0]["keepAlive"] != float64(15) {
@@ -232,7 +239,7 @@ func TestGetXrayConfigWireGuardOmitsKeepAliveAbsentFromSettings(t *testing.T) {
 	if err := database.GetDB().Where("email = ?", email).First(&shared).Error; err != nil {
 		t.Fatalf("read shared client: %v", err)
 	}
-	if shared.PublicKey != "pub-awg" || shared.KeepAlive.Seconds() != 25 {
+	if shared.PublicKey != wgTestKey("pub-awg") || shared.KeepAlive.Seconds() != 25 {
 		t.Fatalf("test setup did not persist AmneziaWG identity: publicKey=%q keepAlive=%d", shared.PublicKey, shared.KeepAlive.Seconds())
 	}
 
@@ -240,7 +247,7 @@ func TestGetXrayConfigWireGuardOmitsKeepAliveAbsentFromSettings(t *testing.T) {
 	if len(peers) != 1 {
 		t.Fatalf("expected 1 peer, got %d: %v", len(peers), peers)
 	}
-	if peers[0]["publicKey"] != "pub-wg" {
+	if peers[0]["publicKey"] != wgTestKey("pub-wg") {
 		t.Fatalf("WireGuard peer publicKey = %v, want pub-wg", peers[0]["publicKey"])
 	}
 	if _, ok := peers[0]["keepAlive"]; ok {
@@ -303,4 +310,34 @@ func TestForceUserspaceWireGuardTun(t *testing.T) {
 			}
 		})
 	}
+}
+
+// xray-core refuses the whole config over one malformed peer key, which stopped the
+// core for every inbound; that client is now left out of the peers instead.
+func TestGetXrayConfigWireGuardLeavesOutPeerWithMalformedKey(t *testing.T) {
+	seedWGInbound(t, "wg-bad-key", 51825, []model.Client{
+		{Email: "good@wg.test", Enable: true, PublicKey: wgTestKey("good"), AllowedIPs: []string{"10.0.0.2/32"}},
+		{Email: "bad@wg.test", Enable: true, PublicKey: "not-a-key", AllowedIPs: []string{"10.0.0.3/32"}},
+	})
+
+	cfg, err := (&XrayService{}).GetXrayConfig()
+	if err != nil {
+		t.Fatalf("GetXrayConfig: %v", err)
+	}
+	for _, ic := range cfg.InboundConfigs {
+		if ic.Tag != "wg-bad-key" {
+			continue
+		}
+		var inbound map[string]any
+		raw, _ := json.Marshal(ic)
+		if err := json.Unmarshal(raw, &inbound); err != nil {
+			t.Fatalf("unmarshal inbound: %v", err)
+		}
+		assertXrayAccepts(t, "the wireguard inbound", buildGoldenInbound(t, inbound))
+		if peers := wgPeerList(t, inbound["settings"].(map[string]any)); len(peers) != 1 || peers[0]["email"] != "good@wg.test" {
+			t.Fatalf("peers = %v, want only good@wg.test", peers)
+		}
+		return
+	}
+	t.Fatal("inbound wg-bad-key not found in generated config")
 }
