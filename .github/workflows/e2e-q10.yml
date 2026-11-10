@@ -1,0 +1,15 @@
+name: e2e-q10
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Delete ufw rules 1 and 3 through the x-ui.sh menu with real ufw (base, then head)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash .github/e2e/ufw.sh
