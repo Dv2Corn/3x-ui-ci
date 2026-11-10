@@ -275,6 +275,18 @@ func checkIPOrCIDRList(list, message string) error {
 }
 
 func (s *AllSetting) CheckValid() error {
+	for _, d := range []struct {
+		name  string
+		value *string
+	}{{"web domain", &s.WebDomain}, {"sub domain", &s.SubDomain}} {
+		// The domain is compared with the request's host name; a scheme, port or path never matches.
+		v := strings.TrimSpace(*d.value)
+		if net.ParseIP(strings.Trim(v, "[]")) == nil && strings.ContainsAny(v, ":/\\@?# \t") {
+			return common.NewError(d.name+" must be a bare host name without scheme, port or path:", v)
+		}
+		*d.value = common.NormalizeHost(v)
+	}
+
 	if s.WebListen != "" {
 		ip := net.ParseIP(s.WebListen)
 		if ip == nil {

@@ -2,9 +2,28 @@ package common
 
 import (
 	"errors"
+	"net"
 	"net/url"
 	"strings"
+
+	"golang.org/x/net/idna"
 )
+
+var hostProfile = idna.New(idna.MapForLookup(), idna.StrictDomainName(false))
+
+// NormalizeHost reduces a host, with or without a port, to the form browsers send
+// in Host: lower case, IDN as punycode, no IPv6 brackets or root's trailing dot.
+func NormalizeHost(host string) string {
+	host = strings.TrimSpace(host)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.Trim(host, "[]"), ".")
+	if ascii, err := hostProfile.ToASCII(host); err == nil {
+		host = ascii
+	}
+	return strings.ToLower(host)
+}
 
 // EnsureURLScheme prepends https:// to a URL that carries no scheme, so
 // subscription apps and browsers don't resolve it relative to the panel's own

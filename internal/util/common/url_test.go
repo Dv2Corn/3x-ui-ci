@@ -55,3 +55,29 @@ func TestParseRemoteRoutingURLKeepsInlineCompatibility(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeHost(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{"empty", "", ""},
+		{"blank", "   ", ""},
+		{"plain", "panel.example.com", "panel.example.com"},
+		{"upper case", "Panel.Example.COM", "panel.example.com"},
+		{"trailing dot", "panel.example.com.", "panel.example.com"},
+		{"spaces and port", " panel.example.com:2053 ", "panel.example.com"},
+		{"IDN", "BÜCHER.example", "xn--bcher-kva.example"},
+		{"underscore kept", "my_panel.example.com", "my_panel.example.com"},
+		{"IPv4 with port", "203.0.113.10:2053", "203.0.113.10"},
+		{"IPv6 with port", "[2001:DB8::1]:2053", "2001:db8::1"},
+		{"IPv6 bracketed", "[2001:db8::1]", "2001:db8::1"},
+		{"IPv6 bare", "2001:db8::1", "2001:db8::1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeHost(tt.in); got != tt.want {
+				t.Errorf("NormalizeHost(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
