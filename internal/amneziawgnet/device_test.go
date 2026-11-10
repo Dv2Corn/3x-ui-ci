@@ -58,6 +58,11 @@ func TestNewDeviceHandshakeForwarderAndIdentity(t *testing.T) {
 			Email:      wantEmail,
 			PublicKey:  clientPub,
 			AllowedIPs: []string{"10.201.0.2/32"},
+		}, {
+			// Another client's malformed key must not keep this one off the device.
+			Email:      "malformed@example.com",
+			PublicKey:  "not-a-key",
+			AllowedIPs: []string{"10.201.0.3/32"},
 		}},
 	}
 
@@ -685,5 +690,35 @@ func TestBuildUAPIConfigRefusesAStoredUnboundedPreamble(t *testing.T) {
 	inst := amneziawg.Instance{PrivateKey: priv, Obfuscation: amneziawg.Obfuscation31{Jc: 1 << 31, Jmin: 10, Jmax: 20}}
 	if _, err := buildUAPIConfig(inst, DeviceOptions{}); err == nil {
 		t.Fatal("a stored Jc of 2^31 reached the device")
+	}
+}
+
+func TestBuildUAPIConfigLeavesOutPeerWithMalformedKey(t *testing.T) {
+	priv, good, err := wireguard.GenerateWireguardKeypair()
+	if err != nil {
+		t.Fatalf("generate keypair: %v", err)
+	}
+	goodHex, _ := wireguard.KeyToHex(good)
+	for _, bad := range []amneziawg.Peer{
+		{Email: "bad-public", PublicKey: "not-a-key", AllowedIPs: []string{"10.8.1.3/32"}},
+		{Email: "bad-preshared", PublicKey: strings.Repeat("B", 43) + "=", PresharedKey: "short", AllowedIPs: []string{"10.8.1.3/32"}},
+	} {
+		t.Run(bad.Email, func(t *testing.T) {
+			inst := amneziawg.Instance{
+				PrivateKey:  priv,
+				Obfuscation: amneziawg.Obfuscation31{S1: 20, S2: 20, S3: 20, S4: 20},
+				Peers:       []amneziawg.Peer{{Email: "good", PublicKey: good, AllowedIPs: []string{"10.8.1.2/32"}}, bad},
+			}
+			conf, err := buildUAPIConfig(inst, DeviceOptions{})
+			if err != nil {
+				t.Fatalf("one malformed peer failed the whole device config: %v", err)
+			}
+			if got := strings.Count(conf, "public_key="); got != 1 || !strings.Contains(conf, "public_key="+goodHex+"\n") {
+				t.Fatalf("want only the good peer, got:\n%s", conf)
+			}
+			if strings.Contains(conf, "10.8.1.3/32") {
+				t.Fatalf("the malformed peer reached the device:\n%s", conf)
+			}
+		})
 	}
 }
