@@ -165,6 +165,53 @@ func TestFetchSubscriptionLinksSharesStaleResultAfterRefreshFailure(t *testing.T
 	}
 }
 
+// failingProvider answers 502 to every fetch and counts them.
+func failingProvider(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	allowLoopbackProvider(t)
+	resetSubscriptionCache(t)
+	requests := new(atomic.Int32)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, requests
+}
+
+// A dead provider is asked once per subscriptionRetryDelay, not on every subscription
+// request, each of which would otherwise wait for it up to the client timeout.
+func TestFetchSubscriptionLinksWaitsBeforeAskingAFailedProviderAgain(t *testing.T) {
+	srv, requests := failingProvider(t)
+
+	if res := fetchSubscriptionLinks(srv.URL); !res.fetched || res.err == nil {
+		t.Fatalf("first fetch = %+v, want a failed network fetch", res)
+	}
+	if res := fetchSubscriptionLinks(srv.URL); res.fetched || res.links != nil {
+		t.Fatalf("fetch within the retry delay: fetched=%v links=%v err=%v, want no network fetch and no links", res.fetched, res.links, res.err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
+	}
+}
+
+func TestFetchSubscriptionLinksAsksAFailedProviderAgainAfterTheDelay(t *testing.T) {
+	srv, requests := failingProvider(t)
+
+	fetchSubscriptionLinks(srv.URL)
+	subscriptionCache.Lock()
+	entry := subscriptionCache.m[srv.URL]
+	entry.failedAt = time.Now().Add(-subscriptionRetryDelay)
+	subscriptionCache.m[srv.URL] = entry
+	subscriptionCache.Unlock()
+	if res := fetchSubscriptionLinks(srv.URL); !res.fetched {
+		t.Fatalf("fetch after the retry delay = %+v, want the provider asked again", res)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+}
+
 func TestDoFetchSubscriptionLinks_RejectsOversizedBody(t *testing.T) {
 	allowLoopbackProvider(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
